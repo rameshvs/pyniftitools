@@ -217,12 +217,6 @@ upsample
             trim_slicing(*args)
         elif len(args) == 8:
             trim_bounding_box(args[0], args[1], *map(int, args[2:]))
-    elif cmd == 'split':
-        if len(args) == 3:
-            split_warp(*args)
-    elif cmd == 'merge':
-        if len(args) == 4:
-            merge_warps(*args)
     else:
         print(help, file=sys.stderr)
         sys.exit(1)
