@@ -7,7 +7,9 @@ or .nii.gz) format.
 Can be used from the command line.
 """
 from __future__ import print_function
+from __future__ import division
 import sys
+import ast
 
 import numpy as np
 import nibabel as nib
@@ -91,7 +93,14 @@ def neutralize_affine(infile, outfile):
     new.to_filename(outfile)
 
 
-def trim(infile, outfile, slices=None):
+def trim_bounding_box(infile, outfile, xmin, ymin, zmin, xmax, ymax, zmax):
+    """
+    Trims the input volume using the specified bounding box.
+    """
+    slicers = [slice(xmin, xmax), slice(ymin, ymax), slice(zmin, zmax)]
+    trim_slicing(infile, outfile, slicers, update_headers=True)
+
+def trim_slicing(infile, outfile, slices=None, update_headers=True):
     """
     Trims the input volume using the list of slice objects provided and
     saves the result.
@@ -111,17 +120,49 @@ def trim(infile, outfile, slices=None):
     dimension and y dimension and downsample the y dimension,
     while leaving the z dimension untouched.
 
-    trim('in.nii.gz', 'out.nii.gz', [slice(30,200), slice(20, 280, 2), None]
+    trim_slicing('in.nii.gz', 'out.nii.gz', [slice(30,200), slice(20, 280, 2), None]
 
-    trim('in.nii.gz', 'out.nii.gz', niitools.slicer[30:200, 20:280,2, :])
+    trim_slicing('in.nii.gz', 'out.nii.gz', niitools.slicer[30:200, 20:280,2, :])
     """
     if slices is None:
         slices = [slice(49,211), slice(22,220), slice(38,183)]
     inp = nib.load(infile)
 
-    out = nib.Nifti1Image(inp.get_data()[slices], header=inp.get_header(), affine=inp.get_affine())
+    aff = inp.get_affine()
+    if update_headers:
+        # modify origin according to affine * what we added
+        aff[:3, -1] += np.dot(aff[:3,:3], np.array([s.start for s in slices]))
+    out = nib.Nifti1Image(inp.get_data()[slices], header=inp.get_header(), affine=aff)
 
     out.to_filename(outfile)
+
+def crop_to_bounding_box(infile, outfile):
+    """
+    Crops the volume in infile to locations where it is nonzero.
+    Prints the resulting bounding box in the following format:
+    xmin ymin zmin xmax ymax zmax
+    """
+    nii = nib.load(infile)
+    aff = nii.get_affine()
+    data = nii.get_data()
+    minmaxes = []
+    slicing = []
+    for axis, otheraxes in enumerate([[2,1], [2,0], [1,0]]):
+        one_axis = np.apply_over_axes(np.sum, data, otheraxes).squeeze()
+        # hack because image has a weird bright patch
+        (nonzero_locs,) = np.where(one_axis)
+        minmaxes.append((nonzero_locs.min(), nonzero_locs.max()))
+
+
+    minima = [int(min) for (min, max) in minmaxes]
+    maxima = [int(max) for (min, max) in minmaxes]
+    slicing = [slice(min, max, None) for (min, max) in minmaxes]
+    aff[:3, -1] += minima
+    out = nib.Nifti1Image(data[slicing], header=nii.get_header(), affine=aff)
+    out.update_header()
+    out.to_filename(outfile)
+    print(" ".join(map(str,minima)))
+    print(" ".join(map(str,maxima)))
 
 if __name__ == '__main__':
     help = \
@@ -140,8 +181,20 @@ neutralize_affine
     removes affine information from header of infile, saves result to outfile
 
 trim
-    {fname} trim <infile> <outfile>
-    trims the volume in infile, assuming a 256^3 brain MRI
+    {fname} trim <infile> <outfile> [<xmin <ymin> <zmin> <xmax> <ymax> <zmax>]
+    trims the volume in infile; if bbox not given, assumes 256^3 brain MR
+
+split
+    {fname} split <dimension> <inwarp> <splitpattern>
+    Splits a warp into separate volumes/images for each dimension.
+
+merge
+    {fname} merge <dimension> <inpattern> <templatewarp> <outputfile>
+    Splits a warp into separate volumes/images for each dimension.
+
+upsample
+    {fname} upsample <input> <output> <output_mask> <axis> <ratio>
+    Upsamples an image along the given axis by the given amount.
 """.format(fname=sys.argv[0])
 
     if len(sys.argv) < 3:
@@ -161,7 +214,15 @@ trim
             neutralize_affine(*args)
     elif cmd == 'trim':
         if len(args) == 2:
-            trim(*args)
+            trim_slicing(*args)
+        elif len(args) == 8:
+            trim_bounding_box(args[0], args[1], *map(int, args[2:]))
+    elif cmd == 'split':
+        if len(args) == 3:
+            split_warp(*args)
+    elif cmd == 'merge':
+        if len(args) == 4:
+            merge_warps(*args)
     else:
         print(help, file=sys.stderr)
         sys.exit(1)
