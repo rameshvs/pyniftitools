@@ -1,6 +1,6 @@
 # niitools: tools for working with NifTI files
 
-This module contains miscellaneous useful operations on
+This package contains miscellaneous useful operations on
 NifTI volumes, such as masking, adjusting headers, and
 trimming.
 
