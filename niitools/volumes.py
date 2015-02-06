@@ -1,9 +1,105 @@
 from __future__ import print_function
 from __future__ import division
 
+import ast
+
 import numpy as np
-from numpy import newaxis as nax
 import nibabel as nib
+
+def _masked_threshold_arr(in_arr, threshold, label_arr, direction, *labels):
+
+    labels = map(int, labels)
+    if len(labels) == 0:
+        labels = [1]
+    mask_arr = np.zeros(label_arr.shape)
+    for label in labels:
+        mask_arr = np.logical_or(mask_arr, label_arr == label)
+    if direction == 'greater':
+        binary = in_arr > threshold
+    elif direction == 'less':
+        binary = in_arr < threshold
+    return np.logical_and(mask_arr, binary)
+
+
+def _masked_threshold(infile, threshold, outfile, mode='scalar', labelfile='-', direction='greater', units='mm', *labels):
+    """
+    Counts how many voxels are above/below a threshold.
+
+    Inputs
+    ------
+    infile : filename with the input image
+    threshold : numeric threshold
+    outfile : a file to write to. If mode is 'scalar', writes a number.
+                  Otherwise, writes a nifti volume
+    mode : 'scalar' (writes a single number with the total volume)
+            or 'nii' (writes a binary mask with the result of thresholding)
+    labelfile : filename of a mask/labelmap to count within. use '-' for no mask
+    direction : 'greater' or 'less'. 'greater' counts intensities
+                above threshold, and 'less' counts intensities
+                below.
+    units : either 'mm' (writes results in mm^3) or 'voxels'
+    """
+    if type(threshold) is str:
+        threshold = ast.literal_eval(threshold)
+    nii = nib.load(infile)
+    data = nii.get_data()
+    if labelfile == '-':
+        label_arr = np.ones(data.shape)
+    else:
+        label_arr = nib.load(labelfile).get_data()
+    vol = _masked_threshold_arr(data, threshold, label_arr, direction, *labels)
+    if mode == 'scalar':
+        count = vol.sum()
+        if units == 'mm':
+            count *= nii.get_header()['pixdim'][1:4].prod()
+        elif units != 'voxels':
+            raise ValueError("I expected units in mm or voxels, but you asked for  " + units)
+
+        with open(outfile, 'w') as f:
+            f.write(str(count))
+    else:
+        out = nib.Nifti1Image(vol, header=nii.get_header(),
+                affine=nii.get_affine())
+        out.to_filename(outfile)
+
+def masked_threshold(infile, threshold, outfile, labelfile='-',
+        direction='greater', *labels):
+    """
+    Thresholds a volume within a mask, and saves a new binary
+    mask of voxels that are above/below the threshold.
+
+    Inputs
+    ------
+    infile : filename with the input image
+    threshold : numeric threshold
+    outfile : a file to write the output image to
+    labelfile : filename of a mask/labelmap to count within. use '-' for no mask
+    direction : 'greater' or 'less'. 'greater' counts intensities
+                above threshold, and 'less' counts intensities below.
+    labels : labels within which to do thresholding
+    """
+    _masked_threshold(infile, threshold, outfile, 'nii',
+            labelfile, direction, 'mm', *labels)
+
+def masked_threshold_count(infile, threshold, outfile, labelfile='-',
+        direction='greater', units='mm', *labels):
+    """
+    Thresholds a volume within a mask, and saves how much
+    of the volume is above/below the threshold.
+
+    Inputs
+    ------
+    infile : filename with the input image
+    threshold : numeric threshold
+    outfile : a text file to write the output value to
+    labelfile : filename of a mask/labelmap to count within. use '-' for no mask
+    direction : 'greater' or 'less'. 'greater' counts intensities
+                above threshold, and 'less' counts intensities below.
+    units : either 'mm' (writes results in mm^3) or 'voxels'
+    labels : labels within which to do thresholding
+    """
+    _masked_threshold(infile, threshold, outfile, 'scalar',
+            labelfile, direction, units, *labels)
 
 def mask(infile, maskfile, outfile):
     """
@@ -28,7 +124,6 @@ def mask(infile, maskfile, outfile):
     out = nib.Nifti1Image(masked, header=inp.get_header(), affine=inp.get_affine())
 
     out.to_filename(outfile)
-
 
 def crop_to_bounding_box(infile, outfile):
     """

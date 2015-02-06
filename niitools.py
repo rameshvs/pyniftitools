@@ -15,6 +15,8 @@ functions = {
         'copy_header': niitools.headers.copy_header,
         'convert_type': niitools.headers.convert_type,
         'upsample': niitools.resampling.upsample_axis,
+        'masked_threshold': niitools.volumes.masked_threshold,
+        'masked_threshold_count': niitools.volumes.masked_threshold_count,
         }
 
 def print_help(func, name):
@@ -57,6 +59,9 @@ if __name__ == '__main__':
         min = max
     else:
         min = max - len(argspec.defaults)
+    if argspec.varargs is not None: # varargs means we can accept an unbounded #
+        max = len(arguments)+1
+
     if not (min <= len(arguments) <= max):
         print_help(func, command)
         sys.exit(1)
