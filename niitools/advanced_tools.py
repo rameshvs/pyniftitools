@@ -21,6 +21,8 @@ def scale_intensity(input, mask, new_intensity, output):
     input so that the mode intensity is new_intensity, and saves the result
     in nifti file output.
     """
+    if type(new_intensity) is str:
+        new_intensity = ast.literal_eval(new_intensity)
     in_nii = nib.load(input)
     mask_nii = nib.load(mask)
     mask_img = mask_nii.get_data()

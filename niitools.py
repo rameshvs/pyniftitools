@@ -4,6 +4,7 @@ import sys
 import inspect
 
 import niitools
+import niitools.advanced_tools
 
 functions = {
         'majority_vote': niitools.labels.majority_vote,
@@ -17,6 +18,7 @@ functions = {
         'upsample': niitools.resampling.upsample_axis,
         'masked_threshold': niitools.volumes.masked_threshold,
         'masked_threshold_count': niitools.volumes.masked_threshold_count,
+        'scale_intensity': niitools.advanced_tools.scale_intensity,
         }
 
 def print_help(func, name):
