@@ -1,18 +1,19 @@
 from __future__ import print_function
 from __future__ import division
 
+import ast
 import numpy as np
 from numpy import newaxis as nax
 import nibabel as nib
 
-def dice(bin1, bin2):
+def _dice(bin1, bin2):
     """
     Computes the Dice coefficient between two binary arrays.
     """
     dice = 2*np.logical_and(bin1, bin2).sum()/(bin1.sum() + bin2.sum())
     return dice
 
-def jaccard(bin1, bin2):
+def _jaccard(bin1, bin2):
     """
     Computes the Jaccard index between two binary arrays.
     """
@@ -20,7 +21,12 @@ def jaccard(bin1, bin2):
     return jaccard
 
 def majority_vote(output, *inputs):
-    imgs = [nii.get_data() for nii in inputs]
+    """
+    Computes a majority vote between all inputs (assumed to be label maps) and
+    saves the result in output.
+    """
+    niftis = [nib.load(inp) for inp in inputs]
+    imgs = [nii.get_data() for nii in niftis]
     axis = imgs[0].ndim
     img_arr = np.concatenate([img[...,nax] for img in imgs], axis)
 
@@ -29,8 +35,8 @@ def majority_vote(output, *inputs):
     for (ii,label) in enumerate(labels):
         counts[...,ii] = np.sum(img_arr == label, axis)
 
-    header = inputs[0].get_header()
-    affine = inputs[0].get_affine()
+    header = niftis[0].get_header()
+    affine = niftis[0].get_affine()
     out = labels[np.argmax(counts, axis)]
     nib.Nifti1Image(out, header=header, affine=affine).to_filename(output)
 
@@ -59,17 +65,35 @@ def overlap(in1, in2, out_txt, similarity, *labels):
         with open(out_txt, 'w') as f:
             f.write(output)
 
+def count_labels(input, out_txt, *labels):
+    """
+    Counts the number of voxels with each label in input.
+    """
+    arr = nib.load(input).get_data()
+    out = []
+    for label in labels:
+        if type(label) is str:
+            label = ast.literal_eval(label)
+        out.append(repr((arr == label).sum()))
+    output = '\n'.join(out)
+
+    if out_txt == '-':
+        print(output)
+    else:
+        with open(out_txt, 'w') as f:
+            f.write(output)
+
 def dice_nii(in1, in2, out_txt, *labels):
     """
     Computes Dice overlap between two nifti volumes.
     See documentation for overlap() for more info
     """
-    overlap(in1, in2, out_txt, dice, *labels)
+    overlap(in1, in2, out_txt, _dice, *labels)
 
 def jaccard_nii(in1, in2, out_txt, *labels):
     """
     Computes Jaccard overlap between two nifti volumes.
     See documentation for overlap() for more info
     """
-    overlap(in1, in2, out_txt, jaccard, *labels)
+    overlap(in1, in2, out_txt, _jaccard, *labels)
 

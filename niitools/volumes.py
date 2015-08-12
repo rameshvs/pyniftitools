@@ -6,7 +6,16 @@ import ast
 import numpy as np
 import nibabel as nib
 
-def _masked_threshold_arr(in_arr, threshold, label_arr, direction, *labels):
+def warp_ssd(in1, in2, template, output):
+    """
+    Computes the SSD between two warps, using template for header info.
+    """
+    ssd = np.sum((nib.load(in1).get_data() - nib.load(in2).get_data())**2, 4).squeeze()
+    template_nii = nib.load(template)
+    out = nib.Nifti1Image(ssd, header=template_nii.get_header(), affine=template_nii.get_affine())
+    out.to_filename(output)
+
+def _masked_threshold_arr(in_arr, threshold, label_arr, exclude_arr, direction, *labels):
 
     labels = map(int, labels)
     if len(labels) == 0:
@@ -14,14 +23,56 @@ def _masked_threshold_arr(in_arr, threshold, label_arr, direction, *labels):
     mask_arr = np.zeros(label_arr.shape)
     for label in labels:
         mask_arr = np.logical_or(mask_arr, label_arr == label)
+    mask_arr = np.logical_and(mask_arr, np.logical_not(exclude_arr))
     if direction == 'greater':
         binary = in_arr > threshold
     elif direction == 'less':
         binary = in_arr < threshold
+    if len(binary.shape) == 4:
+        binary = binary[:,:,:,0]
     return np.logical_and(mask_arr, binary)
 
+def ssd(in1, in2, output):
+    first = nib.load(in1).get_data() 
+    second = nib.load(in2).get_data()
+    if first.shape == (256,256,256) and second.shape == (170,170,170):
+        ssd = np.sum((first[43:-43,43:-43,43:-43]- second)**2)
+    else:
+        ssd = np.sum((first- second)**2)
+    with open(output, 'w') as f:
+        f.write(repr(ssd))
 
-def _masked_threshold(infile, threshold, outfile, mode='scalar', labelfile='-', direction='greater', units='mm', *labels):
+def gaussian_blur(infile, outfile, sigma):
+    from scipy.ndimage.filters import gaussian_filter
+    if type(sigma) is str:
+        sigma = ast.literal_eval(sigma)
+    in_nii = nib.load(infile)
+
+    in_arr = in_nii.get_data()
+    out_arr = np.zeros_like(in_arr)
+    if len(in_arr.shape) == 5:
+        assert in_arr.shape[3] == 1
+        assert in_arr.shape[4] == 3
+        # Warp: blur x,y,z separately
+        for i in xrange(3):
+            gaussian_filter(
+                    in_arr[:,:,:,0,i],
+                    sigma=sigma,
+                    output=out_arr[:,:,:,0,i])
+    elif len(in_arr.shape) == 3:
+            gaussian_filter(
+                    in_arr[:,:,:],
+                    sigma=sigma,
+                    output=out_arr[:,:,:])
+
+    out_nii = nib.Nifti1Image(out_arr, header=in_nii.get_header(), affine=in_nii.get_affine())
+    out_nii.to_filename(outfile)
+
+
+
+
+def _masked_threshold(infile, threshold, outfile, mode='scalar', excludefile='-',
+        labelfile='-', direction='greater', units='mm', *labels):
     """
     Counts how many voxels are above/below a threshold.
 
@@ -33,6 +84,8 @@ def _masked_threshold(infile, threshold, outfile, mode='scalar', labelfile='-', 
                   Otherwise, writes a nifti volume
     mode : 'scalar' (writes a single number with the total volume)
             or 'nii' (writes a binary mask with the result of thresholding)
+    excludefile: filename of a binary mask to exclude from the results.
+                 use '-' for no mask
     labelfile : filename of a mask/labelmap to count within. use '-' for no mask
     direction : 'greater' or 'less'. 'greater' counts intensities
                 above threshold, and 'less' counts intensities
@@ -43,11 +96,17 @@ def _masked_threshold(infile, threshold, outfile, mode='scalar', labelfile='-', 
         threshold = ast.literal_eval(threshold)
     nii = nib.load(infile)
     data = nii.get_data()
+
     if labelfile == '-':
         label_arr = np.ones(data.shape)
     else:
         label_arr = nib.load(labelfile).get_data()
-    vol = _masked_threshold_arr(data, threshold, label_arr, direction, *labels)
+
+    if excludefile == '-':
+        exclude_arr = np.zeros(data.shape)
+    else:
+        exclude_arr = nib.load(excludefile).get_data()
+    vol = _masked_threshold_arr(data, threshold, label_arr, exclude_arr, direction, *labels)
     if mode == 'scalar':
         count = vol.sum()
         if units == 'mm':
@@ -62,8 +121,8 @@ def _masked_threshold(infile, threshold, outfile, mode='scalar', labelfile='-', 
                 affine=nii.get_affine())
         out.to_filename(outfile)
 
-def masked_threshold(infile, threshold, outfile, labelfile='-',
-        direction='greater', *labels):
+def masked_threshold(infile, threshold, outfile, excludefile='-',
+        labelfile='-', direction='greater', *labels):
     """
     Thresholds a volume within a mask, and saves a new binary
     mask of voxels that are above/below the threshold.
@@ -78,11 +137,11 @@ def masked_threshold(infile, threshold, outfile, labelfile='-',
                 above threshold, and 'less' counts intensities below.
     labels : labels within which to do thresholding
     """
-    _masked_threshold(infile, threshold, outfile, 'nii',
+    _masked_threshold(infile, threshold, outfile, 'nii', excludefile,
             labelfile, direction, 'mm', *labels)
 
-def masked_threshold_count(infile, threshold, outfile, labelfile='-',
-        direction='greater', units='mm', *labels):
+def masked_threshold_count(infile, threshold, outfile, excludefile='-',
+        labelfile='-', direction='greater', units='mm', *labels):
     """
     Thresholds a volume within a mask, and saves how much
     of the volume is above/below the threshold.
@@ -98,7 +157,7 @@ def masked_threshold_count(infile, threshold, outfile, labelfile='-',
     units : either 'mm' (writes results in mm^3) or 'voxels'
     labels : labels within which to do thresholding
     """
-    _masked_threshold(infile, threshold, outfile, 'scalar',
+    _masked_threshold(infile, threshold, outfile, 'scalar', excludefile,
             labelfile, direction, units, *labels)
 
 def mask(infile, maskfile, outfile):
@@ -152,6 +211,56 @@ def crop_to_bounding_box(infile, outfile):
     out.to_filename(outfile)
     print(" ".join(map(str,minima)))
     print(" ".join(map(str,maxima)))
+
+def pad(niiFileName, paddedNiiFileName, maskNiiFileName, padAmountMM='30'):
+    """
+    pad a nifti and save the nifti and the relevant mask.
+
+    Example arguments:
+    niiFileName = '10529_t1.nii.gz'
+    paddedNiiFileName = 'padded_10529_t1.nii.gz'
+    maskNiiFileName = 'padded_10529_t1_mask.nii.gz'
+    padAmountMM = '30'; [default]
+    """
+
+    # padding amount in mm
+    padAmountMM = int(padAmountMM)
+
+    # load the nifti
+    nii = nib.load(niiFileName)
+
+    # get the amount of padding in voxels
+    pixdim = nii.get_header()['pixdim'][1:4]
+    padAmount = np.ceil(padAmountMM / pixdim)
+    dims = nii.get_header()['dim'][1:4]
+    assert np.all(dims.shape == padAmount.shape)
+    newDims = dims + padAmount * 2
+
+    # compute where the center is for padding
+    center = newDims/2
+    starts = np.round(center - dims/2)
+    ends = starts + dims
+
+    # compute a slice object with the start/end of the center subvolume
+    slicer = [slice(start, end) for (start, end) in zip(starts, ends)]
+
+    # set the subvolume in the center of the image w/the padding around it
+    vol = np.zeros(newDims)
+    vol[slicer] = nii.get_data()
+    volMask = np.zeros(newDims)
+    volMask[slicer] = np.ones(dims)
+
+    # update affine
+    affine = nii.get_affine()
+    affine[:3, 3] -= padAmountMM
+    # create niftis
+    newNii = nib.Nifti1Image(vol, header=nii.get_header(), affine=affine)
+    newNiiMask = nib.Nifti1Image(volMask, header=nii.get_header(), affine=affine)
+
+    # save niftis
+    newNii.to_filename(paddedNiiFileName)
+    newNiiMask.to_filename(maskNiiFileName)
+    return (newNii, newNiiMask)
 
 def trim_bounding_box(infile, outfile, xmin, ymin, zmin, xmax, ymax, zmax):
     """

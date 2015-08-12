@@ -35,9 +35,13 @@ def scale_intensity(input, mask, new_intensity, output):
     voxels = in_img[mask_img > 0]
     voxels -= voxels.min()
 
-    (mode, _) =  mean_shift_mode_finder(voxels)
+    (mode, _) =  mean_shift_mode_finder(voxels.squeeze())
+    print(voxels.dtype)
+    print(type(mode))
+    print(type(new_intensity))
+    print(out_img.dtype)
 
-    out_img[mask_img > 0] = voxels * new_intensity / mode
+    out_img[mask_img > 0] = voxels * (new_intensity / mode)
 
     out_nii = nib.Nifti1Image(out_img, header=in_nii.get_header(),
             affine=in_nii.get_affine())
@@ -120,6 +124,8 @@ def mean_shift_mode_finder(data, sigma=None, n_replicates=10,
 
     best = np.argmax(scores)
     n_good_replicates = np.sum(np.abs(means[best] - means) < sigma / 5) - 1
+    print(means)
+    print(sigma)
     print("%d other replicates matched the best one." % n_good_replicates)
     # out = {}
     # out['score'] = scores[best]
