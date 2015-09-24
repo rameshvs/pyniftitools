@@ -106,6 +106,18 @@ def _masked_threshold(infile, threshold, outfile, mode='scalar', excludefile='-'
         exclude_arr = np.zeros(data.shape)
     else:
         exclude_arr = nib.load(excludefile).get_data()
+
+    if label_arr.shape != exclude_arr.shape:
+        # Sometimes one might have an extra singleton dimension which messes things
+        # up down the road. If removing singleton dimensions helps, then just do it
+        data_, label_, exclude_ = [np.squeeze(a) for a in (data, label_arr, exclude_arr)]
+        if data_.shape == label_.shape == exclude_.shape:
+            data = data_
+            exclude_arr = exclude_
+            label_arr = label_
+        else:
+            raise ValueError("Input file dimensions don't match: %s %s %s" %
+                    (data.shape, label_arr.shape, exclude_arr.shape))
     vol = _masked_threshold_arr(data, threshold, label_arr, exclude_arr, direction, *labels)
     if mode == 'scalar':
         count = vol.sum()
